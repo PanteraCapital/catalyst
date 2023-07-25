@@ -80,7 +80,7 @@ empyrical==0.2.1
 
 tables==3.4.2
 
-certifi==2018.1.18
+certifi==2023.7.22
 
 #Catalyst dependencies
 ccxt==1.17.94
