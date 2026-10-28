@@ -377,7 +377,9 @@ class BundleExtractTraversalTests(unittest.TestCase):
 
     def _payload(self):
         return (
-            'open({0!r}, "w").write("executed")\n'.format(self.marker_path)
+            'handle = open({0!r}, "w")\n'
+            'handle.write("executed")\n'
+            'handle.close()\n'.format(self.marker_path)
         ).encode('utf-8')
 
     def test_regular_member_is_extracted_inside_destination(self):
