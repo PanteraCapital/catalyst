@@ -28,8 +28,10 @@ from catalyst.marketplace.marketplace_errors import (
     MarketplaceNoCSVFiles, MarketplaceRequiresPython3)
 from catalyst.marketplace.utils.auth_utils import get_key_secret, \
     get_signed_headers
+from catalyst.marketplace.utils.display_utils import display_name, \
+    is_printable_name
 from catalyst.marketplace.utils.eth_utils import bin_hex, from_grains, \
-    to_grains
+    format_grains, to_grains
 from catalyst.marketplace.utils.path_utils import get_bundle_folder, \
     get_data_source_folder, get_marketplace_folder, \
     get_user_pubaddr, get_temp_bundles_folder, extract_bundle, \
@@ -188,7 +190,7 @@ class Marketplace:
 
         return address, address_i
 
-    def sign_transaction(self, tx):
+    def sign_transaction(self, tx, approve_grains=None):
 
         url = 'https://legacy.mycrypto.com/#offline-transaction'
         print('\nVisit {url} and enter the following parameters:\n\n'
@@ -206,8 +208,13 @@ class Marketplace:
                   value=tx['value'],
                   gas=tx['gas'],
                   nonce=tx['nonce'],
-                  data=tx['data'], )
+                  data=tx['data'], ),
+              end=''
               )
+        if approve_grains is not None:
+            print('ENG amount approved:\t{} ENG ({} grains)'.format(
+                format_grains(approve_grains), approve_grains))
+        print()
 
         webbrowser.open_new(url)
 
@@ -248,6 +255,9 @@ class Marketplace:
                     )
         return pd.DataFrame(data)
 
+    def _print_datasets(self, df):
+        print(df.assign(dataset=df['dataset'].map(display_name)))
+
     def list(self):
         df = self._list()
 
@@ -255,7 +265,7 @@ class Marketplace:
         if df.empty:
             print('There are no datasets available yet.')
         else:
-            print(df)
+            self._print_datasets(df)
 
     def subscribe(self, dataset=None):
 
@@ -268,7 +278,7 @@ class Marketplace:
 
             set_print_settings()
             while True:
-                print(df_sets)
+                self._print_datasets(df_sets)
                 dataset_num = input('Choose the dataset you want to '
                                     'subscribe to [0..{}]: '.format(
                                         df_sets.size - 1))
@@ -286,6 +296,7 @@ class Marketplace:
                         break
 
         dataset = dataset.lower()
+        shown_name = display_name(dataset)
 
         address = self.choose_pubaddr()[0]
         provider_info = self.mkt_contract.functions.getDataProviderInfo(
@@ -294,11 +305,11 @@ class Marketplace:
 
         if not provider_info[4]:
             print('The requested "{}" dataset is not registered in '
-                  'the Data Marketplace.'.format(dataset))
+                  'the Data Marketplace.'.format(shown_name))
             return
 
         grains = provider_info[1]
-        price = from_grains(grains)
+        price = format_grains(grains)
 
         subscribed = self.mkt_contract.functions.checkAddressSubscription(
             address, Web3.toHex(dataset.encode())
@@ -309,7 +320,7 @@ class Marketplace:
                 '\nYou are already subscribed to the "{}" dataset.\n'
                 'Your subscription started on {} UTC, and is valid until '
                 '{} UTC.'.format(
-                    dataset,
+                    shown_name,
                     pd.to_datetime(subscribed[3], unit='s', utc=True),
                     pd.to_datetime(subscribed[4], unit='s', utc=True)
                 )
@@ -346,14 +357,14 @@ class Marketplace:
                   'buy: {} ENG. Get enough ENG to cover the costs of the '
                   'monthly\nsubscription for what you are trying to buy, '
                   'and try again.'.format(
-                      address, from_grains(balance), price))
+                      address, format_grains(balance), price))
             return
 
         while True:
             agree_pay = input('Please confirm that you agree to pay {} ENG '
                               'for a monthly subscription to the dataset "{}" '
                               'starting today. [default: Y] '.format(
-                                  price, dataset)) or 'y'
+                                  price, shown_name)) or 'y'
             if agree_pay.lower() not in ('y', 'n'):
                 print("Please answer Y or N.")
             else:
@@ -362,7 +373,7 @@ class Marketplace:
                 else:
                     return
 
-        print('Ready to subscribe to dataset {}.\n'.format(dataset))
+        print('Ready to subscribe to dataset {}.\n'.format(shown_name))
         print('In order to execute the subscription, you will need to sign '
               'two different transactions:\n'
               '1. First transaction is to authorize the Marketplace contract '
@@ -378,7 +389,13 @@ class Marketplace:
              'nonce': self.web3.eth.getTransactionCount(address)}
         )
 
-        signed_tx = self.sign_transaction(tx)
+        approve_grains = int(tx['data'][-64:], 16)
+        if approve_grains != grains:
+            print('The approve transaction does not match the price of the '
+                  'dataset. Aborting...')
+            return
+
+        signed_tx = self.sign_transaction(tx, approve_grains=approve_grains)
         try:
             tx_hash = '0x{}'.format(
                 bin_hex(self.web3.eth.sendRawTransaction(signed_tx))
@@ -452,7 +469,7 @@ class Marketplace:
               'You can now ingest this dataset anytime during the '
               'next month by running the following command:\n'
               'catalyst marketplace ingest --dataset={}'.format(
-                  dataset, address, dataset))
+                  shown_name, address, shown_name))
 
     def process_temp_bundle(self, ds_name, path):
         """
@@ -491,7 +508,7 @@ class Marketplace:
 
             set_print_settings()
             while True:
-                print(df_sets)
+                self._print_datasets(df_sets)
                 dataset_num = input('Choose the dataset you want to '
                                     'ingest [0..{}]: '.format(
                                         df_sets.size - 1))
@@ -509,6 +526,7 @@ class Marketplace:
                         break
 
         # ds_name = ds_name.lower()
+        shown_name = display_name(ds_name)
 
         # TODO: catch error conditions
         provider_info = self.mkt_contract.functions.getDataProviderInfo(
@@ -517,7 +535,7 @@ class Marketplace:
 
         if not provider_info[4]:
             print('The requested "{}" dataset is not registered in '
-                  'the Data Marketplace.'.format(ds_name))
+                  'the Data Marketplace.'.format(shown_name))
             return
 
         address, address_i = self.choose_pubaddr()
@@ -528,16 +546,16 @@ class Marketplace:
 
         if check_sub[0] != address or self.to_text(check_sub[1]) != ds_name:
             print('You are not subscribed to dataset "{}" with address {}. '
-                  'Plese subscribe first.'.format(ds_name, address))
+                  'Plese subscribe first.'.format(shown_name, address))
             return
 
         if not check_sub[5]:
             print('Your subscription to dataset "{}" expired on {} UTC.'
                   'Please renew your subscription by running:\n'
                   'catalyst marketplace subscribe --dataset={}'.format(
-                      ds_name,
+                      shown_name,
                       pd.to_datetime(check_sub[4], unit='s', utc=True),
-                      ds_name)
+                      shown_name)
                   )
 
         if 'key' in self.addresses[address_i]:
@@ -596,7 +614,7 @@ class Marketplace:
                 error=r.status_code,
             )
 
-        log.info('{} ingested successfully'.format(ds_name))
+        log.info('{} ingested successfully'.format(shown_name))
 
     def get_dataset(self, ds_name, start=None, end=None):
         ds_name = ds_name.lower()
@@ -630,7 +648,7 @@ class Marketplace:
 
             while True:
                 for idx, f in enumerate(folders):
-                    print('{}\t{}'.format(idx, f))
+                    print('{}\t{}'.format(idx, display_name(f)))
                 dataset_num = input('Choose the dataset you want to '
                                     'clean [0..{}]: '.format(
                                         len(folders) - 1))
@@ -691,6 +709,10 @@ class Marketplace:
     def register(self):
         while True:
             desc = input('Enter the name of the dataset to register: ')
+            if not is_printable_name(desc):
+                print('The name of the dataset can only contain printable '
+                      'characters. Please choose a different name.')
+                continue
             dataset = desc.lower().strip()
             provider_info = self.mkt_contract.functions.getDataProviderInfo(
                 Web3.toHex(dataset.encode())
@@ -699,7 +721,7 @@ class Marketplace:
             if provider_info[4]:
                 print('There is already a dataset registered under '
                       'the name "{}". Please choose a different '
-                      'name.'.format(dataset))
+                      'name.'.format(display_name(dataset)))
             else:
                 break
 
@@ -792,7 +814,7 @@ class Marketplace:
                 print('.', end='', flush=True)
                 time.sleep(1)
 
-        print('\nWarming up the {} dataset'.format(dataset))
+        print('\nWarming up the {} dataset'.format(display_name(dataset)))
         self.create_metadata(
             key=key,
             secret=secret,
@@ -802,7 +824,7 @@ class Marketplace:
             has_history=has_history,
             has_live=has_live,
         )
-        print('\n{} registered successfully'.format(dataset))
+        print('\n{} registered successfully'.format(display_name(dataset)))
 
     def publish(self, dataset, datadir, watch):
         dataset = dataset.lower()
@@ -811,7 +833,7 @@ class Marketplace:
         ).call()
 
         if not provider_info[4]:
-            raise MarketplaceDatasetNotFound(dataset=dataset)
+            raise MarketplaceDatasetNotFound(dataset=display_name(dataset))
 
         match = next(
             (l for l in self.addresses if l['pubAddr'] == provider_info[0]),
@@ -819,7 +841,7 @@ class Marketplace:
         )
         if not match:
             raise MarketplaceNoAddressMatch(
-                dataset=dataset,
+                dataset=display_name(dataset),
                 address=provider_info[0])
 
         print('Using address: {} to publish this dataset.'.format(
@@ -862,7 +884,7 @@ class Marketplace:
         log.info('File processed successfully.')
 
         print('\nDataset {} uploaded and processed successfully.'.format(
-            dataset))
+            display_name(dataset)))
 
     def get_withdraw_amount(self, dataset=None):
 
@@ -875,7 +897,7 @@ class Marketplace:
 
             set_print_settings()
             while True:
-                print(df_sets)
+                self._print_datasets(df_sets)
                 dataset_num = input('Choose the dataset you want to '
                                     'get the withdraw amount for '
                                     '[0..{}]: '.format(df_sets.size - 1))
@@ -901,7 +923,7 @@ class Marketplace:
 
         if not provider_info[4]:
             print('The requested "{}" dataset is not registered in '
-                  'the Data Marketplace.'.format(dataset))
+                  'the Data Marketplace.'.format(display_name(dataset)))
             return
 
         withdraw_amount = from_grains(
@@ -918,7 +940,7 @@ class Marketplace:
 
             set_print_settings()
             while True:
-                print(df_sets)
+                self._print_datasets(df_sets)
                 dataset_num = input('Choose the dataset you want to '
                                     'withdraw from [0..{}]: '.format(
                                         df_sets.size - 1))
@@ -944,7 +966,7 @@ class Marketplace:
 
         if not provider_info[4]:
             print('The requested "{}" dataset is not registered in '
-                  'the Data Marketplace.'.format(dataset))
+                  'the Data Marketplace.'.format(display_name(dataset)))
             return
 
         try:
