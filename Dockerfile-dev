@@ -7,19 +7,24 @@
 #
 #    docker build -t enigmampc/catalyst -f Dockerfile .
 #
-# To run the container:
+# Jupyter runs as the unprivileged user 'catalyst' (uid 1000) and requires a token or a
+# hashed password supplied by you. To run the container:
 #
-#    docker run -v /path/to/your/notebooks:/projects -v ~/.catalyst:/root/.catalyst -p 8888:8888/tcp --name catalystdev -it enigmampc/catalystdev
+#    export NOTEBOOK_TOKEN="$(openssl rand -hex 32)"
+#    docker run -v /path/to/your/notebooks:/projects -v ~/.catalyst:/root/.catalyst -e NOTEBOOK_TOKEN -e NOTEBOOK_IP=0.0.0.0 -p 127.0.0.1:8888:8888/tcp --name catalystdev -it enigmampc/catalystdev
 #
-# To access Jupyter when running docker locally (you may need to add NAT rules):
+# The mounted directories must be writable by uid 1000. NOTEBOOK_IP=0.0.0.0 makes Jupyter
+# listen inside the container so that docker can forward the port; without it Jupyter only
+# listens on the container's loopback interface. The -p flag above publishes the port on
+# the host's loopback interface only.
 #
-#    https://127.0.0.1
+# To access Jupyter when running docker locally:
 #
-# Default password is 'jupyter'. To provide another, see:
+#    https://127.0.0.1:8888      <- Please note HTTPS, not HTTP
+#
+# and log in with the value of NOTEBOOK_TOKEN. To use a password instead, pass a hashed
+# password as NOTEBOOK_PASSWORD_HASH, see:
 #    http://jupyter-notebook.readthedocs.org/en/latest/public_server.html#preparing-a-hashed-password
-#
-# Once generated, you can pass the new value via `docker run --env` the first time
-# you start the container.
 #
 # You can also run an algo using the docker exec command. For example:
 #
@@ -27,8 +32,12 @@
 #
 FROM enigmampc/catalyst
 
+USER root
 WORKDIR /catalyst
 
 RUN pip install -r etc/requirements_dev.txt -r etc/requirements_blaze.txt
 # Clean out any cython assets. The pip install re-builds them.
 RUN find . -type f -name '*.c' -exec rm {} + && pip install -e .[all]
+
+RUN chown -R catalyst:catalyst /root
+USER catalyst
