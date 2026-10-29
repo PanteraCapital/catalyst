@@ -15,7 +15,7 @@ from catalyst.exchange.exchange_errors import ExchangeSymbolsNotFound
 from catalyst.exchange.utils.serialization_utils import ExchangeJSONEncoder, \
     ExchangeJSONDecoder
 from catalyst.utils.paths import data_root, ensure_directory, \
-    last_modified_time
+    last_modified_time, validate_path_segment
 
 
 def get_sid(symbol):
@@ -756,7 +756,9 @@ def save_asset_data(folder, df, decimals=8):
     for symbol in symbols:
         symbol_df = df.loc[(symbols == symbol)]  # Type: pd.DataFrame
 
-        filename = os.path.join(folder, '{}.csv'.format(symbol))
+        filename = os.path.join(
+            folder, validate_path_segment('{}.csv'.format(symbol)),
+        )
         if os.path.exists(filename):
             print_headers = False
 

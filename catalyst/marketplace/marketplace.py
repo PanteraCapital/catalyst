@@ -34,7 +34,7 @@ from catalyst.marketplace.utils.path_utils import get_bundle_folder, \
     get_data_source_folder, get_marketplace_folder, \
     get_user_pubaddr, get_temp_bundles_folder, extract_bundle, \
     save_user_pubaddr
-from catalyst.utils.paths import ensure_directory
+from catalyst.utils.paths import ensure_directory, validate_path_segment
 
 if sys.version_info.major < 3:
     import urllib
@@ -573,7 +573,9 @@ class Marketplace:
                     # Extracting the filename from the header
                     name = re.search(r'filename="(.*)"', h).group(1)
 
-                    filename = os.path.join(target_path, name)
+                    filename = os.path.join(
+                        target_path, validate_path_segment(name),
+                    )
                     with open(filename, 'wb') as f:
                         # for chunk in part.content.iter_content(
                         #         chunk_size=1024):

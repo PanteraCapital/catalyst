@@ -6,6 +6,7 @@ import pandas as pd
 
 from catalyst.data.bundles.core import download_without_progress
 from catalyst.exchange.utils.exchange_utils import get_exchange_bundles_folder
+from catalyst.utils.paths import validate_path_segment
 
 
 EXCHANGE_NAMES = ['bitfinex', 'bittrex', 'poloniex', 'binance']
@@ -36,7 +37,7 @@ def get_bcolz_chunk(exchange_name, symbol, data_frequency, period):
         symbol=symbol,
         period=period
     )
-    path = os.path.join(root, name)
+    path = os.path.join(root, validate_path_segment(name))
 
     if not os.path.isdir(path):
         url = 'https://s3.amazonaws.com/enigmaco/catalyst-bundles/' \
