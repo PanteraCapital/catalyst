@@ -42,24 +42,22 @@ ENV PROJECT_DIR=/projects \
 # install TA-Lib and other prerequisites
 #
 
+COPY ./etc/install_talib.sh /tmp/install_talib.sh
+
 RUN mkdir ${PROJECT_DIR} \
     && apt-get -y update \
     && apt-get -y install libfreetype6-dev libpng-dev libopenblas-dev liblapack-dev gfortran \
-    && curl -L https://downloads.sourceforge.net/project/ta-lib/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz | tar xvz
+    && bash /tmp/install_talib.sh /usr \
+    && rm /tmp/install_talib.sh
 
 #
 # build and install catalyst from source.  install TA-Lib after to ensure
 # numpy is available.
 #
 
-WORKDIR /ta-lib
-
 RUN pip install 'numpy==1.14.0' \
   && pip install 'scipy==1.0.0' \
   && pip install 'pandas==0.19.2' \
-  && ./configure --prefix=/usr \
-  && make \
-  && make install \
   && pip install TA-Lib \
   && pip install matplotlib \
   && pip install jupyter
