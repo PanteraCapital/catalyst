@@ -31,10 +31,9 @@ from catalyst.marketplace.utils.auth_utils import get_key_secret, \
 from catalyst.marketplace.utils.eth_utils import bin_hex, from_grains, \
     to_grains
 from catalyst.marketplace.utils.path_utils import get_bundle_folder, \
-    get_data_source_folder, get_marketplace_folder, \
-    get_user_pubaddr, get_temp_bundles_folder, extract_bundle, \
+    get_data_source_folder, get_data_source_path, get_marketplace_folder, \
+    get_user_pubaddr, get_temp_bundle_path, extract_bundle, \
     save_user_pubaddr
-from catalyst.utils.paths import ensure_directory
 
 if sys.version_info.major < 3:
     import urllib
@@ -468,9 +467,8 @@ class Marketplace:
         -------
 
         """
-        tmp_bundle = extract_bundle(path)
         bundle_folder = get_data_source_folder(ds_name)
-        ensure_directory(bundle_folder)
+        tmp_bundle = extract_bundle(path)
         if os.listdir(bundle_folder):
             zsource = bcolz.ctable(rootdir=tmp_bundle, mode='r')
             ztarget = bcolz.ctable(rootdir=bundle_folder, mode='a')
@@ -509,6 +507,8 @@ class Marketplace:
                         break
 
         # ds_name = ds_name.lower()
+
+        bundle_folder = get_data_source_path(ds_name)
 
         # TODO: catch error conditions
         provider_info = self.mkt_contract.functions.getDataProviderInfo(
@@ -556,11 +556,9 @@ class Marketplace:
         )
         if r.status_code == 200:
             log.info('Dataset downloaded successfully. Processing dataset...')
-            bundle_folder = get_data_source_folder(ds_name)
-            shutil.rmtree(bundle_folder, ignore_errors=True)
-            target_path = get_temp_bundles_folder()
             try:
                 decoder = MultipartDecoder.from_response(r)
+                shutil.rmtree(bundle_folder, ignore_errors=True)
                 # with maybe_show_progress(
                 #     iter(decoder.parts),
                 #     True,
@@ -573,7 +571,7 @@ class Marketplace:
                     # Extracting the filename from the header
                     name = re.search(r'filename="(.*)"', h).group(1)
 
-                    filename = os.path.join(target_path, name)
+                    filename = get_temp_bundle_path(name)
                     with open(filename, 'wb') as f:
                         # for chunk in part.content.iter_content(
                         #         chunk_size=1024):
