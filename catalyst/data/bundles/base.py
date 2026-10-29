@@ -28,6 +28,7 @@ from catalyst.utils.cli import (
     maybe_show_progress
 )
 from catalyst.utils.memoize import lazyval
+from catalyst.utils.tar_utils import safe_extract
 
 from catalyst.constants import LOG_LEVEL
 
@@ -230,7 +231,7 @@ class BaseBundle(object):
         # File transfer has completed, untar the bundle to the appropriate
         # data directory.
         with tarfile.open('r', fileobj=data) as tar:
-            tar.extractall(output_dir)
+            safe_extract(tar, output_dir)
 
     def _fetch_metadata_frame(self,
                               api_key,
