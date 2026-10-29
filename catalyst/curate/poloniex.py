@@ -11,6 +11,7 @@ import requests
 
 from catalyst.exchange.utils.exchange_utils import \
     get_exchange_symbols_filename
+from catalyst.utils.paths import validate_path_segment
 
 DT_START = int(time.mktime(datetime(2010, 1, 1, 0, 0).timetuple()))
 DT_END = pd.to_datetime('today').value // 10 ** 9
@@ -19,6 +20,15 @@ CONN_RETRIES = 2
 
 logbook.StderrHandler().push_application()
 log = logbook.Logger(__name__)
+
+
+def _csv_path(kind, currency_pair):
+    validate_path_segment(currency_pair)
+    return '{folder}crypto_{kind}-{pair}.csv'.format(
+        folder=CSV_OUT_FOLDER,
+        kind=kind,
+        pair=currency_pair,
+    )
 
 
 class PoloniexCurator(object):
@@ -54,6 +64,11 @@ class PoloniexCurator(object):
         data = response.json()
         self.currency_pairs = []
         for ticker in data:
+            try:
+                validate_path_segment(ticker)
+            except ValueError:
+                log.warn('Skipping invalid currency pair: {!r}'.format(ticker))
+                continue
             self.currency_pairs.append(ticker)
         self.currency_pairs.sort()
 
@@ -82,7 +97,7 @@ class PoloniexCurator(object):
         This function is called recursively to work around the
         limitations imposed by the provider API.
         '''
-        csv_fn = CSV_OUT_FOLDER + 'crypto_trades-' + currencyPair + '.csv'
+        csv_fn = _csv_path('trades', currencyPair)
 
         '''
         Check what data we already have on disk, reading first and last
@@ -271,8 +286,8 @@ class PoloniexCurator(object):
         '''
         Generates OHLCV data file with 1minute bars from TradeHistory on disk
         '''
-        csv_trades = CSV_OUT_FOLDER + 'crypto_trades-' + currencyPair + '.csv'
-        csv_1min = CSV_OUT_FOLDER + 'crypto_1min-' + currencyPair + '.csv'
+        csv_trades = _csv_path('trades', currencyPair)
+        csv_1min = _csv_path('1min', currencyPair)
         if(os.path.getmtime(csv_1min) > time.time() - 7200):
             log.debug(currencyPair + ': 1min data file already up to date. '
                       'Delete the file if you want to rebuild it.')
@@ -320,7 +335,7 @@ class PoloniexCurator(object):
         '''
         Returns a data frame for a given currencyPair from data on disk
         '''
-        csv_fn = CSV_OUT_FOLDER + 'crypto_1min-' + currencyPair + '.csv'
+        csv_fn = _csv_path('1min', currencyPair)
         df = pd.read_csv(csv_fn, names=['date',
                                         'open',
                                         'high',
@@ -344,8 +359,7 @@ class PoloniexCurator(object):
         with open(filename, 'w') as symbols:
             for currencyPair in self.currency_pairs:
                 start = None
-                csv_fn = '{}crypto_trades-{}.csv'.format(CSV_OUT_FOLDER,
-                                                         currencyPair)
+                csv_fn = _csv_path('trades', currencyPair)
                 with open(csv_fn, 'r') as f:
                     f.seek(0, os.SEEK_END)
                     if(f.tell() > 2):               # Check file size is not 0

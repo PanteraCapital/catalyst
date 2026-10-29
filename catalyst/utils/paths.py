@@ -9,6 +9,39 @@ import os
 from os.path import exists, expanduser, join
 
 import pandas as pd
+from six import string_types
+
+_UNSAFE_SEGMENT_CHARS = frozenset(
+    '/\\:\0' + os.sep + (os.altsep or ''),
+)
+
+
+def validate_path_segment(name):
+    """Check that ``name`` can only ever name an entry directly inside the
+    directory it is joined onto.
+
+    Parameters
+    ----------
+    name : str
+        The candidate file name.
+
+    Returns
+    -------
+    name : str
+        ``name``, unchanged.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a string, consists only of dots and spaces (this
+        includes ``''``, ``.`` and ``..``), or contains a path separator, a
+        drive separator or a NUL byte.
+    """
+    if (not isinstance(name, string_types) or
+            not name.strip('. ') or
+            not _UNSAFE_SEGMENT_CHARS.isdisjoint(name)):
+        raise ValueError('invalid path segment: {!r}'.format(name))
+    return name
 
 
 def hidden(path):

@@ -8,11 +8,29 @@ import pickle
 from distutils import dir_util
 from shutil import rmtree, move
 from tempfile import mkdtemp, NamedTemporaryFile
+from uuid import uuid4
 
 import pandas as pd
 
 from .context_tricks import nop_context
-from .paths import ensure_directory
+from .paths import ensure_directory, validate_path_segment
+
+_O_BINARY = getattr(os, 'O_BINARY', 0)
+_O_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
+
+try:
+    _replace = os.replace
+except AttributeError:
+    if os.name == 'nt':
+        def _replace(src, dst):
+            try:
+                os.remove(dst)
+            except OSError as e:
+                if e.errno != errno.ENOENT:
+                    raise
+            os.rename(src, dst)
+    else:
+        _replace = os.rename
 
 
 class Expired(Exception):
@@ -178,6 +196,9 @@ class dataframe_cache(MutableMapping):
     -----
     The syntax ``cache[:]`` will load all key:value pairs into memory as a
     dictionary.
+    Keys must be single file names: keys made up only of dots and spaces
+    (such as ``..``), or that contain a path separator, ``:`` or a NUL byte
+    raise ``ValueError``.
     The cache uses a temporary file format that is subject to change between
     versions of catalyst.
     """
@@ -207,11 +228,14 @@ class dataframe_cache(MutableMapping):
 
         ensure_directory(self.path)
 
-    def _serialize_pickle(self, df, path):
-        with open(path, 'wb') as f:
-            pickle.dump(df, f, protocol=self._protocol)
+    def _serialize_pickle(self, df, f):
+        pickle.dump(df, f, protocol=self._protocol)
 
     def _keypath(self, key):
+        try:
+            validate_path_segment(key)
+        except ValueError:
+            raise ValueError('invalid cache key: {!r}'.format(key))
         return os.path.join(self.path, key)
 
     def __enter__(self):
@@ -229,23 +253,46 @@ class dataframe_cache(MutableMapping):
         if key == slice(None):
             return dict(self.items())
 
+        path = self._keypath(key)
         with self.lock:
             try:
-                with open(self._keypath(key), 'rb') as f:
-                    return self.deserialize(f)
-            except IOError as e:
+                fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+            except (IOError, OSError) as e:
                 if e.errno != errno.ENOENT:
                     raise
                 raise KeyError(key)
+            with os.fdopen(fd, 'rb') as f:
+                return self.deserialize(f)
 
     def __setitem__(self, key, value):
+        path = self._keypath(key)
         with self.lock:
-            self.serialize(value, self._keypath(key))
+            # Entries are written to a newly created file and renamed into
+            # place, so an existing entry (including a symlink) is replaced
+            # rather than written through.
+            tmp_path = os.path.join(self.path, '.tmp-' + uuid4().hex)
+            fd = os.open(
+                tmp_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW |
+                _O_BINARY,
+                0o666,
+            )
+            try:
+                with os.fdopen(fd, 'wb') as f:
+                    self.serialize(value, f)
+                _replace(tmp_path, path)
+            except BaseException:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+                raise
 
     def __delitem__(self, key):
+        path = self._keypath(key)
         with self.lock:
             try:
-                os.remove(self._keypath(key))
+                os.remove(path)
             except OSError as e:
                 if e.errno == errno.ENOENT:
                     # raise a keyerror if this directory did not exist
