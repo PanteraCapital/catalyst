@@ -4,7 +4,8 @@ import tarfile
 
 from catalyst.constants import SUPPORTED_WALLETS
 from catalyst.utils.deprecate import deprecated
-from catalyst.utils.paths import data_root, ensure_directory
+from catalyst.utils.paths import data_root, ensure_directory, \
+    safe_extract
 from catalyst.marketplace.marketplace_errors import MarketplaceJSONError
 
 
@@ -102,7 +103,7 @@ def extract_bundle(tar_filename):
     """
     target_path = tar_filename.replace('.tar.gz', '')
     with tarfile.open(tar_filename, 'r') as tar:
-        tar.extractall(target_path)
+        safe_extract(tar, target_path)
 
     return target_path
 

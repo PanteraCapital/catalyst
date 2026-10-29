@@ -7,6 +7,8 @@ Otherwise default to expanduser(~/.catalyst)
 from errno import EEXIST
 import os
 from os.path import exists, expanduser, join
+import re
+import tarfile
 
 import pandas as pd
 
@@ -57,6 +59,60 @@ def ensure_file(path):
     """
     ensure_directory_containing(path)
     open(path, 'a+').close()  # touch the file
+
+
+class UnsafeArchiveError(ValueError):
+    pass
+
+
+def _check_archive_member(member, root):
+    if not (member.isreg() or member.isdir()):
+        raise UnsafeArchiveError(
+            'refusing to extract {!r}: only regular files and directories '
+            'are allowed'.format(member.name))
+
+    name = member.name
+    if (os.path.isabs(name) or os.path.splitdrive(name)[0]
+            or '..' in re.split(r'[\\/]', name)):
+        raise UnsafeArchiveError(
+            'refusing to extract {!r}: absolute or parent directory '
+            'path'.format(name))
+
+    target = os.path.realpath(join(root, name))
+    if target == root:
+        if not member.isdir():
+            raise UnsafeArchiveError(
+                'refusing to extract {!r}: file would replace {}'.format(
+                    name, root))
+    elif not target.startswith(root + os.sep):
+        raise UnsafeArchiveError(
+            'refusing to extract {!r}: resolves outside {}'.format(
+                name, root))
+
+
+def safe_extract(tar, path):
+    """
+    Extract every member of ``tar`` into ``path``.
+
+    The whole archive is checked before anything is written. Members must be
+    regular files or directories whose resolved location is inside ``path``;
+    any other member makes the archive fail with ``UnsafeArchiveError``.
+
+    Parameters
+    ----------
+    tar : tarfile.TarFile
+    path : str
+        The destination directory.
+    """
+    root = os.path.realpath(path)
+    members = tar.getmembers()
+    for member in members:
+        _check_archive_member(member, root)
+
+    kwargs = {}
+    if hasattr(tarfile, 'data_filter'):
+        kwargs['filter'] = 'data'
+    tar.extractall(root, members=members, **kwargs)
 
 
 def update_modified_time(path, times=None):
