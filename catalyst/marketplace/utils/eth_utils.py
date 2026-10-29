@@ -66,6 +66,25 @@ def from_grains(amount):
     return amount // 10 ** 8
 
 
+def format_grains(amount):
+    """
+    Format an amount of grains as an exact decimal ENG amount
+
+    Parameters
+    ----------
+    input: amount
+
+    Returns
+    -------
+    str
+
+    """
+    eng, fraction = divmod(amount, 10 ** 8)
+    if not fraction:
+        return str(eng)
+    return '{}.{}'.format(eng, '{:08d}'.format(fraction).rstrip('0'))
+
+
 def to_grains(amount):
     """
     Convert from cryptocurrency to grains
