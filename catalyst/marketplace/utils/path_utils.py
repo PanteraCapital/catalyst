@@ -2,10 +2,50 @@ import os
 import json
 import tarfile
 
+from six import string_types
+
 from catalyst.constants import SUPPORTED_WALLETS
 from catalyst.utils.deprecate import deprecated
 from catalyst.utils.paths import data_root, ensure_directory
-from catalyst.marketplace.marketplace_errors import MarketplaceJSONError
+from catalyst.marketplace.marketplace_errors import MarketplaceJSONError, \
+    MarketplaceInvalidName
+
+# Entries of the marketplace folder that are not datasets.
+RESERVED_MARKETPLACE_NAMES = ('temp_bundles', 'addresses.json')
+
+
+def _child_path(parent, name, reserved=()):
+    """
+    Join a single untrusted path component under ``parent``.
+
+    Dataset names come from the marketplace contract and file names from
+    the ingest server, so anything that could resolve to a location other
+    than a direct child of ``parent`` is rejected before the filesystem is
+    touched.
+
+    Parameters
+    ----------
+    parent: str
+    name: str
+    reserved: tuple[str]
+
+    Returns
+    -------
+    str
+
+    """
+    if not isinstance(name, string_types) or not name \
+            or name.startswith('.') or name in reserved or '\0' in name \
+            or any(sep and sep in name
+                   for sep in ('/', '\\', os.sep, os.altsep)) \
+            or os.path.isabs(name) or os.path.splitdrive(name)[0]:
+        raise MarketplaceInvalidName(name=name)
+
+    path = os.path.join(parent, name)
+    if os.path.dirname(os.path.realpath(path)) != os.path.realpath(parent):
+        raise MarketplaceInvalidName(name=name)
+
+    return path
 
 
 def get_marketplace_folder(environ=None):
@@ -45,21 +85,38 @@ def get_data_source_folder(data_source_name, environ=None):
     str
 
     """
-    if not environ:
-        environ = os.environ
-
-    root = data_root(environ)
-    data_source_folder = os.path.join(root, 'marketplace', data_source_name)
+    data_source_folder = get_data_source_path(data_source_name, environ)
     ensure_directory(data_source_folder)
 
     return data_source_folder
+
+
+def get_data_source_path(data_source_name, environ=None):
+    """
+    The path of a data_source folder, without creating it.
+
+    Parameters
+    ----------
+    data_source_name: str
+    environ:
+
+    Returns
+    -------
+    str
+
+    """
+    return _child_path(
+        get_marketplace_folder(environ),
+        data_source_name,
+        RESERVED_MARKETPLACE_NAMES,
+    )
 
 
 @deprecated
 def get_bundle_folder(data_source_name, data_frequency, environ=None):
     data_source_folder = get_data_source_folder(data_source_name, environ)
 
-    bundle_folder = os.path.join(data_source_folder, data_frequency)
+    bundle_folder = _child_path(data_source_folder, data_frequency)
 
     ensure_directory(bundle_folder)
 
@@ -87,9 +144,29 @@ def get_temp_bundles_folder(environ=None):
     return folder
 
 
+def get_temp_bundle_path(filename, environ=None):
+    """
+    The path of a downloaded file inside the temp bundles folder.
+
+    Parameters
+    ----------
+    filename: str
+    environ:
+
+    Returns
+    -------
+    str
+
+    """
+    return _child_path(get_temp_bundles_folder(environ), filename)
+
+
 def extract_bundle(tar_filename):
     """
     Extract a bcolz bundle.
+
+    Only regular files and directories that stay inside the target folder
+    are accepted.
 
     Parameters
     ----------
@@ -101,8 +178,19 @@ def extract_bundle(tar_filename):
 
     """
     target_path = tar_filename.replace('.tar.gz', '')
+    root = os.path.realpath(target_path)
     with tarfile.open(tar_filename, 'r') as tar:
-        tar.extractall(target_path)
+        members = tar.getmembers()
+        for member in members:
+            dest = os.path.realpath(os.path.join(root, member.name))
+            if not (member.isfile() or member.isdir()) or \
+                    (dest != root and not dest.startswith(root + os.sep)):
+                raise MarketplaceInvalidName(name=member.name)
+
+        if hasattr(tarfile, 'data_filter'):
+            tar.extractall(target_path, members=members, filter='data')
+        else:
+            tar.extractall(target_path, members=members)
 
     return target_path
 

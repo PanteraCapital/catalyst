@@ -10,7 +10,7 @@ def silent_except_hook(exctype, excvalue, exctraceback):
                    MarketplaceNoCSVFiles, MarketplaceContractDataNoMatch,
                    MarketplaceSubscriptionExpired, MarketplaceJSONError,
                    MarketplaceWalletNotSupported, MarketplaceEmptySignature,
-                   MarketplaceRequiresPython3]:
+                   MarketplaceRequiresPython3, MarketplaceInvalidName]:
         fn = traceback.extract_tb(exctraceback)[-1][0]
         ln = traceback.extract_tb(exctraceback)[-1][1]
         print("Error traceback: {1} (line {2})\n"
@@ -95,3 +95,10 @@ class MarketplaceRequiresPython3(ZiplineError):
         'If you want to use the Data Marketplace, you need to reinstall '
         'Catalyst\nwith Python3. See the documentation website for additional '
         'information.')
+
+
+class MarketplaceInvalidName(ZiplineError):
+    msg = (
+        'Refusing to use "{name}" as a local marketplace path: names must be '
+        'a single plain path component.'
+    )
