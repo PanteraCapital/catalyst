@@ -1,8 +1,17 @@
-from unittest import TestCase
+import os
+from shutil import rmtree
+from tempfile import mkdtemp
+from unittest import TestCase, skipIf
 
-from pandas import Timestamp, Timedelta
+from pandas import DataFrame, Timestamp, Timedelta
+from pandas.util.testing import assert_frame_equal
 
-from catalyst.utils.cache import CachedObject, Expired, ExpiringCache
+from catalyst.utils.cache import (
+    CachedObject,
+    Expired,
+    ExpiringCache,
+    dataframe_cache,
+)
 
 
 class CachedObjectTestCase(TestCase):
@@ -58,3 +67,134 @@ class ExpiringCacheTestCase(TestCase):
         with self.assertRaises(KeyError) as e:
             self.assertEqual(cache.get('baz', expiry_3))
         self.assertEqual(e.exception.args, ('baz',))
+
+
+class DataFrameCacheTestCase(TestCase):
+
+    def setUp(self):
+        self.root = mkdtemp()
+        self.cache_dir = os.path.join(self.root, 'cache')
+        self.frame = DataFrame({'a': [1, 2, 3]})
+
+    def tearDown(self):
+        rmtree(self.root)
+
+    def _outside_entries(self):
+        return sorted(
+            name for name in os.listdir(self.root) if name != 'cache'
+        )
+
+    def test_round_trip(self):
+        for serialization in ('msgpack', 'pickle'):
+            cache = dataframe_cache(self.cache_dir,
+                                    serialization=serialization)
+            cache['BTC_ETH.daily.frame'] = self.frame
+            assert_frame_equal(cache['BTC_ETH.daily.frame'], self.frame)
+            self.assertEqual(list(cache), ['BTC_ETH.daily.frame'])
+            self.assertEqual(len(cache), 1)
+
+            cache['BTC_ETH.daily.frame'] = self.frame * 2
+            assert_frame_equal(cache['BTC_ETH.daily.frame'], self.frame * 2)
+            self.assertEqual(list(cache), ['BTC_ETH.daily.frame'])
+
+            del cache['BTC_ETH.daily.frame']
+            with self.assertRaises(KeyError):
+                cache['BTC_ETH.daily.frame']
+            self.assertEqual(len(cache), 0)
+
+    def test_invalid_keys_are_rejected(self):
+        cache = dataframe_cache(self.cache_dir)
+        victim = os.path.join(self.root, 'victim.frame')
+        with open(victim, 'wb') as f:
+            f.write(b'original')
+
+        bad_keys = [
+            '../victim.frame',
+            '../escaped.frame',
+            '../../escaped.frame',
+            'nested/../../escaped.frame',
+            'nested/key.frame',
+            os.path.join(self.root, 'absolute.frame'),
+            victim,
+            '..',
+            '.',
+            '',
+            '...',
+            ' .. ',
+            'back\\slash.frame',
+            'nul\0.frame',
+            'C:drive.frame',
+            None,
+            1,
+        ]
+        for key in bad_keys:
+            with self.assertRaises(ValueError):
+                cache[key] = self.frame
+            with self.assertRaises(ValueError):
+                cache[key]
+            with self.assertRaises(ValueError):
+                del cache[key]
+
+        with open(victim, 'rb') as f:
+            self.assertEqual(f.read(), b'original')
+        self.assertEqual(self._outside_entries(), ['victim.frame'])
+        self.assertEqual(os.listdir(self.cache_dir), [])
+
+    @skipIf(not hasattr(os, 'symlink'), 'symlinks not supported')
+    def test_symlinked_entry_is_not_written_through(self):
+        cache = dataframe_cache(self.cache_dir)
+        victim = os.path.join(self.root, 'victim.frame')
+        with open(victim, 'wb') as f:
+            f.write(b'original')
+        os.symlink(victim, os.path.join(self.cache_dir, 'BTC_ETH.frame'))
+
+        cache['BTC_ETH.frame'] = self.frame
+
+        with open(victim, 'rb') as f:
+            self.assertEqual(f.read(), b'original')
+        self.assertFalse(
+            os.path.islink(os.path.join(self.cache_dir, 'BTC_ETH.frame')),
+        )
+        assert_frame_equal(cache['BTC_ETH.frame'], self.frame)
+
+    @skipIf(not hasattr(os, 'symlink'), 'symlinks not supported')
+    def test_symlinked_entry_is_not_read_through(self):
+        outside = dataframe_cache(os.path.join(self.root, 'outside'))
+        outside['secret.frame'] = self.frame
+        cache = dataframe_cache(self.cache_dir)
+        os.symlink(
+            os.path.join(self.root, 'outside', 'secret.frame'),
+            os.path.join(self.cache_dir, 'BTC_ETH.frame'),
+        )
+
+        with self.assertRaises((KeyError, OSError, IOError)):
+            cache['BTC_ETH.frame']
+
+    @skipIf(not hasattr(os, 'symlink'), 'symlinks not supported')
+    def test_symlinked_entry_delete_removes_only_the_link(self):
+        cache = dataframe_cache(self.cache_dir)
+        victim = os.path.join(self.root, 'victim.frame')
+        with open(victim, 'wb') as f:
+            f.write(b'original')
+        os.symlink(victim, os.path.join(self.cache_dir, 'BTC_ETH.frame'))
+
+        del cache['BTC_ETH.frame']
+
+        self.assertTrue(os.path.exists(victim))
+        self.assertEqual(os.listdir(self.cache_dir), [])
+
+    def test_failed_serialization_leaves_no_partial_entry(self):
+        cache = dataframe_cache(self.cache_dir)
+        cache['BTC_ETH.frame'] = self.frame
+
+        def explode(df, buf):
+            buf.write(b'partial')
+            raise RuntimeError('boom')
+
+        cache.serialize = explode
+        with self.assertRaises(RuntimeError):
+            cache['BTC_ETH.frame'] = self.frame * 2
+
+        self.assertEqual(os.listdir(self.cache_dir), ['BTC_ETH.frame'])
+        cache.serialize = DataFrame.to_msgpack
+        assert_frame_equal(cache['BTC_ETH.frame'], self.frame)
