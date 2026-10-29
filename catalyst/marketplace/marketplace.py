@@ -572,6 +572,12 @@ class Marketplace:
                     h = part.headers[b'Content-Disposition'].decode('utf-8')
                     # Extracting the filename from the header
                     name = re.search(r'filename="(.*)"', h).group(1)
+                    if name in ('', '.', '..') or \
+                            re.search(r'[\\/:]', name):
+                        raise MarketplaceHTTPRequest(
+                            request='ingest dataset',
+                            error='invalid file name {!r}'.format(name),
+                        )
 
                     filename = os.path.join(target_path, name)
                     with open(filename, 'wb') as f:
