@@ -1,4 +1,7 @@
 import binascii
+from decimal import Decimal
+
+ENG_DECIMALS = 8
 
 
 # def bytes32(string):
@@ -52,7 +55,7 @@ def bin_hex(binary):
 
 def from_grains(amount):
     """
-    Convert from grains to cryptocurrency
+    Convert from grains to cryptocurrency, without losing any grains
 
     Parameters
     ----------
@@ -60,10 +63,33 @@ def from_grains(amount):
 
     Returns
     -------
-    int
+    Decimal
 
     """
-    return amount // 10 ** 8
+    return Decimal('{}E-{}'.format(int(amount), ENG_DECIMALS))
+
+
+def format_grains(amount):
+    """
+    Format a grain amount as an exact cryptocurrency string
+
+    Parameters
+    ----------
+    input: amount
+
+    Returns
+    -------
+    str
+
+    """
+    amount = int(amount)
+    sign = '-' if amount < 0 else ''
+    whole, fraction = divmod(abs(amount), 10 ** ENG_DECIMALS)
+    if not fraction:
+        return '{}{}'.format(sign, whole)
+    return '{}{}.{}'.format(
+        sign, whole,
+        '{:0{}d}'.format(fraction, ENG_DECIMALS).rstrip('0'))
 
 
 def to_grains(amount):
@@ -79,4 +105,4 @@ def to_grains(amount):
     int
 
     """
-    return amount * 10 ** 8
+    return amount * 10 ** ENG_DECIMALS
