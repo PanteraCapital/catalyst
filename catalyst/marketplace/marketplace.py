@@ -28,7 +28,7 @@ from catalyst.marketplace.marketplace_errors import (
     MarketplaceNoCSVFiles, MarketplaceRequiresPython3)
 from catalyst.marketplace.utils.auth_utils import get_key_secret, \
     get_signed_headers
-from catalyst.marketplace.utils.eth_utils import bin_hex, from_grains, \
+from catalyst.marketplace.utils.eth_utils import bin_hex, format_grains, \
     to_grains
 from catalyst.marketplace.utils.path_utils import get_bundle_folder, \
     get_data_source_folder, get_marketplace_folder, \
@@ -257,6 +257,22 @@ class Marketplace:
         else:
             print(df)
 
+    def _terms_unchanged(self, dataset, confirmed_terms):
+        provider_info = self.mkt_contract.functions.getDataProviderInfo(
+            Web3.toHex(dataset.encode())
+        ).call()
+        if provider_info[4] and \
+                (provider_info[0], provider_info[1]) == confirmed_terms:
+            return True
+
+        print('\nThe on-chain terms for dataset "{}" changed after you '
+              'confirmed a price of {} ENG (price is now {} ENG). '
+              'Aborting before signing any further transaction. '
+              'Run the subscribe command again to review the new '
+              'price.'.format(dataset, format_grains(confirmed_terms[1]),
+                              format_grains(provider_info[1])))
+        return False
+
     def subscribe(self, dataset=None):
 
         if dataset is None:
@@ -297,8 +313,11 @@ class Marketplace:
                   'the Data Marketplace.'.format(dataset))
             return
 
+        # The buyer confirms these terms; the approve must authorize exactly
+        # this grain amount, and nothing is signed if the chain disagrees.
+        confirmed_terms = (provider_info[0], provider_info[1])
         grains = provider_info[1]
-        price = from_grains(grains)
+        price = format_grains(grains)
 
         subscribed = self.mkt_contract.functions.checkAddressSubscription(
             address, Web3.toHex(dataset.encode())
@@ -346,7 +365,7 @@ class Marketplace:
                   'buy: {} ENG. Get enough ENG to cover the costs of the '
                   'monthly\nsubscription for what you are trying to buy, '
                   'and try again.'.format(
-                      address, from_grains(balance), price))
+                      address, format_grains(balance), price))
             return
 
         while True:
@@ -361,6 +380,9 @@ class Marketplace:
                     break
                 else:
                     return
+
+        if not self._terms_unchanged(dataset, confirmed_terms):
+            return
 
         print('Ready to subscribe to dataset {}.\n'.format(dataset))
         print('In order to execute the subscription, you will need to sign '
@@ -410,6 +432,9 @@ class Marketplace:
 
         print('\nFirst transaction successful!\n'
               'Now processing second transaction.')
+
+        if not self._terms_unchanged(dataset, confirmed_terms):
+            return
 
         tx = self.mkt_contract.functions.subscribe(
             Web3.toHex(dataset.encode()),
@@ -904,7 +929,7 @@ class Marketplace:
                   'the Data Marketplace.'.format(dataset))
             return
 
-        withdraw_amount = from_grains(
+        withdraw_amount = format_grains(
             self.mkt_contract.functions.getWithdrawAmount(
                 Web3.toHex(dataset.encode())).call())
         print('{} ENG'.format(withdraw_amount))
