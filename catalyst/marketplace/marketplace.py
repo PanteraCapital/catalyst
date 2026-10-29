@@ -35,6 +35,7 @@ from catalyst.marketplace.utils.path_utils import get_bundle_folder, \
     get_user_pubaddr, get_temp_bundles_folder, extract_bundle, \
     save_user_pubaddr
 from catalyst.utils.paths import ensure_directory
+from catalyst.utils.tar_utils import check_filename
 
 if sys.version_info.major < 3:
     import urllib
@@ -571,7 +572,9 @@ class Marketplace:
                         counter, len(decoder.parts)))
                     h = part.headers[b'Content-Disposition'].decode('utf-8')
                     # Extracting the filename from the header
-                    name = re.search(r'filename="(.*)"', h).group(1)
+                    name = check_filename(
+                        re.search(r'filename="(.*)"', h).group(1)
+                    )
 
                     filename = os.path.join(target_path, name)
                     with open(filename, 'wb') as f:

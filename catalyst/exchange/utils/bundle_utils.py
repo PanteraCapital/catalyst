@@ -6,6 +6,7 @@ import pandas as pd
 
 from catalyst.data.bundles.core import download_without_progress
 from catalyst.exchange.utils.exchange_utils import get_exchange_bundles_folder
+from catalyst.utils.tar_utils import safe_extract
 
 
 EXCHANGE_NAMES = ['bitfinex', 'bittrex', 'poloniex', 'binance']
@@ -46,7 +47,7 @@ def get_bcolz_chunk(exchange_name, symbol, data_frequency, period):
 
         bytes = download_without_progress(url)
         with tarfile.open('r', fileobj=bytes) as tar:
-            tar.extractall(path)
+            safe_extract(tar, path)
 
     return path
 
